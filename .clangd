@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-Wall, -Wextra, -I./build/_deps/raylib-src/src, -I./build/generated/]
