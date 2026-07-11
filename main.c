@@ -48,6 +48,7 @@
         if ((array)->count >= (array)->capacity) {                                                  \
             (array)->capacity = (array)->capacity == 0 ? 1 : (array)->capacity * 2;                 \
             (array)->items = realloc((array)->items, (array)->capacity*sizeof(*(array)->items));    \
+            assert((array)->items != NULL);                                                         \
         }                                                                                           \
         (array)->items[(array)->count++] = (item);                                                  \
     } while (false)
@@ -233,7 +234,8 @@ typedef struct {
 typedef enum {
     GAME_STATE_NORMAL,
     GAME_STATE_SHIP_EXPLOSION,
-    GAME_STATE_OVER
+    GAME_STATE_OVER,
+    GAME_STATE_PAUSE
 } GameState;
 
 typedef struct {
@@ -488,6 +490,7 @@ void game_update(Game *game, float delta_time)
             background_update(&game->background, delta_time);
 
             if (IsKeyPressed(KEY_H)) game->draw_hitbox = !game->draw_hitbox;
+            if (IsKeyPressed(KEY_P)) game->state = GAME_STATE_PAUSE;
 
             if (game->destroyed_obstacles > game->last_speedup && game->destroyed_obstacles % 5 == 0) {
                 game->last_speedup = game->destroyed_obstacles;
@@ -514,6 +517,9 @@ void game_update(Game *game, float delta_time)
         case GAME_STATE_OVER:
             if (IsKeyPressed(KEY_ENTER)) game_reset(game);
             break;
+        case GAME_STATE_PAUSE:
+            if (IsKeyPressed(KEY_P)) game->state = GAME_STATE_NORMAL;
+            break;
         default: assert(false && "Unreachable");
     }
 }
@@ -523,21 +529,26 @@ void game_draw(Game game)
     background_draw(game.background);
 
     switch (game.state) {
-        case GAME_STATE_NORMAL: {
+        case GAME_STATE_NORMAL:
             game_draw_obstacles(game);
             game_draw_explosions(game);
             game_draw_ship(game);
 
-            const int score = game.destroyed_obstacles - game.obstacles_missed;
-            DrawText(TextFormat("Score: %d", score), 0.05f*SCREEN_WIDTH, 0.05f*SCREEN_HEIGHT, 30, WHITE);
+            DrawText(TextFormat("Score: %d", game.destroyed_obstacles - game.obstacles_missed), 0.05f*SCREEN_WIDTH, 0.05f*SCREEN_HEIGHT, 30, WHITE);
             break;
-        }
         case GAME_STATE_SHIP_EXPLOSION:
             game_draw_explosions(game);
             break;
         case GAME_STATE_OVER:
             game_draw_game_over(&game);
             break;
+        case GAME_STATE_PAUSE: {
+            const char *text = "Paused";
+            const int font_size = 30;
+            int text_width = MeasureText(text, font_size);
+            DrawText("Paused", SCREEN_WIDTH/2 - text_width/2, SCREEN_HEIGHT/2 - font_size/2, font_size, WHITE);
+            break;
+        }
         default: assert(false && "Unreachable");
     }
 }
