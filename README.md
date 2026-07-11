@@ -1,6 +1,6 @@
-# Flappy ship
+# Flappy Ship
 
-Flappy bird style video game but in space.
+Flappy Bird style video game but in space.
 
 ## Quick start
 
