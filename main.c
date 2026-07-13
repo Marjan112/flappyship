@@ -1,8 +1,10 @@
 #include <raylib.h>
 #include <raymath.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <assert.h>
 
 #include <sounds_SFX_Jump_09.wav.h>
@@ -73,6 +75,26 @@ static Sound load_sound_from_memory(const char *file_type, const unsigned char *
     Sound sound = LoadSoundFromWave(wave);
     UnloadWave(wave);
     return sound;
+}
+
+static void draw_text_centered(int font_size, Color color, const char *text, ...)
+{
+    char buf[1024] = {0};
+
+    va_list args;
+    va_start(args, text);
+    vsnprintf(buf, sizeof(buf), text, args);
+    va_end(args);
+
+    int max_width = 0, line_count = 0;
+
+    char **lines = TextSplit(buf, '\n', &line_count);
+    for (int i = 0; i < line_count; ++i) {
+        int width = MeasureText(lines[i], font_size);
+        if (width > max_width) max_width = width;
+    }
+
+    DrawText(buf, SCREEN_WIDTH / 2 - max_width / 2, SCREEN_HEIGHT / 2 - (line_count*font_size) / 2, font_size, color);
 }
 
 typedef struct {
@@ -302,33 +324,23 @@ void game_draw_game_over(Game *game)
 {
     int score = game->destroyed_obstacles - game->obstacles_missed;
 
-    const char *text;
     if (score < 0) {
-        text = TextFormat("Game over\n"
+        draw_text_centered(30, WHITE,
+                          "Game over\n"
                           "You missed too much\n"
                           "Destroyed obstacles: %d\n"
                           "Missed obstacles: %d\n"
                           "Press ENTER to restart.",
                           game->destroyed_obstacles, game->obstacles_missed);
     } else {
-        text = TextFormat("Game over\n"
+        draw_text_centered(30, WHITE,
+                          "Game over\n"
                           "Destroyed obstacles: %d\n"
                           "Missed obstacles: %d\n"
                           "Score: %d\n"
-                          "Press ENTER to restart.", game->destroyed_obstacles, game->obstacles_missed, score);
+                          "Press ENTER to restart.",
+                          game->destroyed_obstacles, game->obstacles_missed, score);
     }
-
-    int max_width = 0;
-    int line_count = 0;
-    const int text_font_size = 30;
-
-    char **lines = TextSplit(text, '\n', &line_count);
-    for (int i = 0; i < line_count; ++i) {
-        int width = MeasureText(lines[i], text_font_size);
-        if (width > max_width) max_width = width;
-    }
-
-    DrawText(text, SCREEN_WIDTH / 2 - max_width / 2, SCREEN_HEIGHT / 2 - (line_count*text_font_size) / 2, text_font_size, WHITE);
 }
 
 void background_update(Background *background, float delta_time)
@@ -542,13 +554,9 @@ void game_draw(Game game)
         case GAME_STATE_OVER:
             game_draw_game_over(&game);
             break;
-        case GAME_STATE_PAUSE: {
-            const char *text = "Paused";
-            const int font_size = 30;
-            int text_width = MeasureText(text, font_size);
-            DrawText("Paused", SCREEN_WIDTH/2 - text_width/2, SCREEN_HEIGHT/2 - font_size/2, font_size, WHITE);
+        case GAME_STATE_PAUSE:
+            draw_text_centered(30, WHITE, "Paused");
             break;
-        }
         default: assert(false && "Unreachable");
     }
 }
