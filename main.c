@@ -45,6 +45,8 @@
 #define EXPLOSION_ROW               4
 #define EXPLOSION_FRAMES            (EXPLOSION_COLUMN*EXPLOSION_ROW)
 
+#define PARTICLE_SIZE               16
+
 #define da_append(array, item)                                                                      \
     do {                                                                                            \
         if ((array)->count >= (array)->capacity) {                                                  \
@@ -154,15 +156,8 @@ typedef struct {
     bool active;
 } Explosion;
 
-typedef struct {
-    Sound shared_sound;
-    Texture shared_texture;
-    Explosion *items;
-    size_t count;
-    size_t capacity;
-} Explosions;
-
-Explosion new_explosion(float x, float y, float velocity, Texture texture, Sound sound) {
+Explosion new_explosion(float x, float y, float velocity, Texture texture, Sound sound)
+{
     return CLITERAL(Explosion) {
         .sound = sound,
         .texture = texture,
@@ -173,17 +168,20 @@ Explosion new_explosion(float x, float y, float velocity, Texture texture, Sound
         },
         .frame = 0,
         .timer = 0,
-        .frame_time = 0.05f,
+        .frame_time = 0.025f,
         .active = true
     };
 }
 
-void explosion_update(Explosion *explosion, float delta_time) {
+void explosion_update(Explosion *explosion, float delta_time)
+{
     if (!explosion->active) return;
 
     explosion->timer += delta_time;
 
     if (!IsSoundPlaying(explosion->sound)) PlaySound(explosion->sound);
+
+    explosion->position.x -= explosion->velocity*delta_time;
 
     if (explosion->timer >= explosion->frame_time) {
         explosion->frame++;
@@ -192,7 +190,8 @@ void explosion_update(Explosion *explosion, float delta_time) {
     }
 }
 
-void explosion_draw(Explosion explosion) {
+void explosion_draw(Explosion explosion)
+{
     if (!explosion.active) return;
 
     const int frame_width = explosion.texture.width/EXPLOSION_COLUMN;
@@ -214,6 +213,118 @@ void explosion_draw(Explosion explosion) {
 
     Vector2 origin = {32, 32};
     DrawTexturePro(explosion.texture, source, dest, origin, 0, WHITE);
+}
+
+typedef struct {
+    Sound shared_sound;
+    Texture shared_texture;
+    Explosion *items;
+    size_t count;
+    size_t capacity;
+} Explosions;
+
+bool explosions_update(Explosions *explosions, float delta_time)
+{
+    for (size_t i = 0; i < explosions->count;) {
+        Explosion *explosion = &explosions->items[i];
+
+        explosion_update(explosion, delta_time);
+
+        if (!explosion->active) {
+            da_remove_unordered(explosions, i);
+            continue;
+        }
+
+        ++i;
+    }
+
+    return explosions->count != 0;
+}
+
+void explosions_draw(Explosions explosions)
+{
+    for (size_t i = 0; i < explosions.count; ++i) explosion_draw(explosions.items[i]);
+}
+
+typedef struct {
+    Texture whole_texture; // The whole texture of something to be broken into particles
+    Rectangle source;
+    Vector2 position;
+    Vector2 velocity;
+    float life;
+} Particle;
+
+typedef struct {
+    Particle *items;
+    size_t count;
+    size_t capacity;
+} Particles;
+
+void particles_add(Particles *particles, Texture whole_texture, Vector2 position, Vector2 emmiter_velocity)
+{
+    for (int i = 0; i < 10; ++i) {
+        int frame_width = whole_texture.width/4;
+        int frame_height = whole_texture.height/4;
+        int frame_x = GetRandomValue(0, 3);
+        int frame_y = GetRandomValue(0, 3);
+
+        Vector2 base_velocity = {
+            GetRandomValue(-100, 100),
+            GetRandomValue(-100, 100)
+        };
+
+        Particle particle = {
+            .whole_texture = whole_texture,
+            .source = {
+                .x = frame_x*frame_width,
+                .y = frame_y*frame_height,
+                .width = frame_width,
+                .height = frame_height
+            },
+            .position = position,
+            .velocity = Vector2Subtract(base_velocity, emmiter_velocity),
+            .life = 1
+        };
+
+        da_append(particles, particle);
+    }
+}
+
+bool particles_update(Particles *particles, float delta_time)
+{
+    for (size_t i = 0; i < particles->count;) {
+        Particle *particle = &particles->items[i];
+        particle->position.x += particle->velocity.x*delta_time;
+        particle->position.y += particle->velocity.y*delta_time;
+        particle->life -= delta_time;
+
+        if (particle->life <= 0) {
+            da_remove_unordered(particles, i);
+            continue;
+        }
+
+        ++i;
+    }
+
+    return particles->count != 0;
+}
+
+void particles_draw(Particles particles)
+{
+    for (size_t i = 0; i < particles.count; ++i) {
+        Particle particle = particles.items[i];
+
+        Vector2 origin = {particle.source.width/2, particle.source.height/2};
+        Rectangle dest = {
+            .x = particle.position.x,
+            .y = particle.position.y,
+            .width = PARTICLE_SIZE,
+            .height = PARTICLE_SIZE
+        };
+
+        Color tint = Fade(WHITE, particle.life);
+        DrawTexturePro(particle.whole_texture, particle.source, dest, origin, 0, tint);
+    }
 }
 
 typedef struct {
@@ -266,6 +377,7 @@ typedef struct {
     Obstacles obstacles;
     Sound wha_wha_sound;
     Background background;
+    Particles particles;
     int destroyed_obstacles;
     int obstacles_missed;
     int last_speedup;
@@ -284,12 +396,15 @@ Game game_init()
     explosions.shared_sound = load_sound_from_memory(".wav", sounds_explosion_wav, sounds_explosion_wav_size);
     explosions.shared_texture = load_texture_from_memory(".png", textures_explosion_pixelfied_png, textures_explosion_pixelfied_png_size);
 
+    Particles particles = {0};
+
     return CLITERAL(Game) {
         .obstacles = obstacles,
         .ship = new_ship(),
         .wha_wha_sound = load_sound_from_memory(".mp3", sounds_wha_wha_mp3, sounds_wha_wha_mp3_size),
         .explosions = explosions,
         .background = new_background(),
+        .particles = particles,
         .destroyed_obstacles = 0,
         .obstacles_missed = 0,
         .last_speedup = 0,
@@ -314,6 +429,8 @@ void game_reset(Game *game) {
     game->obstacles.velocity = OBSTACLE_VELOCITY;
 
     game->explosions.count = 0;
+
+    game->particles.count = 0;
 
     game->destroyed_obstacles = 0;
     game->obstacles_missed = 0;
@@ -380,7 +497,7 @@ void game_update_ship(Game *game, float delta_time)
 
     game->ship.position.y += game->ship.velocity*delta_time;
     game->ship.hitbox.x = game->ship.position.x - SHIP_WIDTH / 2.0f;
-    game->ship.hitbox.y = game->ship.position.y - SHIP_WIDTH / 2.0f;
+    game->ship.hitbox.y = game->ship.position.y - SHIP_HEIGHT / 2.0f;
     game->ship.rotation = Lerp(game->ship.rotation, target_rotation, SHIP_ROTATION_SPEED*delta_time);
 }
 
@@ -423,16 +540,22 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
             0,
             game->explosions.shared_texture, LoadSoundAlias(game->explosions.shared_sound));
         da_append(&game->explosions, explosion);
+
+        particles_add(&game->particles, game->ship.texture, game->ship.position, Vector2Zero());
         return;
     }
 
     if (game->ship.position.x > obstacle->position.x && game->ship.position.y < obstacle->position.y - OBSTACLE_HEIGHT / 2.0f) {
         obstacle->destroyed = true;
         ++game->destroyed_obstacles;
+
+        particles_add(&game->particles, game->obstacles.shared_texture, obstacle->position, CLITERAL(Vector2){game->obstacles.velocity, 0});
+
         Explosion explosion = new_explosion(
             obstacle->position.x, obstacle->position.y,
             game->obstacles.velocity,
             game->explosions.shared_texture, LoadSoundAlias(game->explosions.shared_sound));
+
         da_append(&game->explosions, explosion);
     }
 }
@@ -469,30 +592,6 @@ void game_draw_obstacles(Game game)
     for (size_t i = 0; i < game.obstacles.count; ++i) game_draw_obstacle(game, i);
 }
 
-bool game_update_explosions(Game *game, float delta_time)
-{
-    for (size_t i = 0; i < game->explosions.count;) {
-        Explosion *explosion = &game->explosions.items[i];
-
-        explosion_update(explosion, delta_time);
-        explosion->position.x -= explosion->velocity*delta_time;
-
-        if (!explosion->active) {
-            da_remove_unordered(&game->explosions, i);
-            continue;
-        }
-
-        ++i;
-    }
-
-    return game->explosions.count != 0;
-}
-
-void game_draw_explosions(Game game)
-{
-    for (size_t i = 0; i < game.explosions.count; ++i) explosion_draw(game.explosions.items[i]);
-}
-
 void game_update(Game *game, float delta_time)
 {
     game->obstacles.spawn_timer += delta_time;
@@ -520,11 +619,13 @@ void game_update(Game *game, float delta_time)
             }
 
             game_update_obstacles(game, delta_time);
-            game_update_explosions(game, delta_time);
+            explosions_update(&game->explosions, delta_time);
+            particles_update(&game->particles, delta_time);
             game_update_ship(game, delta_time);
             break;
         case GAME_STATE_SHIP_EXPLOSION:
-            if (!game_update_explosions(game, delta_time)) game->state = GAME_STATE_OVER;
+            if (!explosions_update(&game->explosions, delta_time) && !particles_update(&game->particles, delta_time))
+                game->state = GAME_STATE_OVER;
             break;
         case GAME_STATE_OVER:
             if (IsKeyPressed(KEY_ENTER)) game_reset(game);
@@ -543,13 +644,15 @@ void game_draw(Game game)
     switch (game.state) {
         case GAME_STATE_NORMAL:
             game_draw_obstacles(game);
-            game_draw_explosions(game);
+            explosions_draw(game.explosions);
+            particles_draw(game.particles);
             game_draw_ship(game);
 
             DrawText(TextFormat("Score: %d", game.destroyed_obstacles - game.obstacles_missed), 0.05f*SCREEN_WIDTH, 0.05f*SCREEN_HEIGHT, 30, WHITE);
             break;
         case GAME_STATE_SHIP_EXPLOSION:
-            game_draw_explosions(game);
+            explosions_draw(game.explosions);
+            particles_draw(game.particles);
             break;
         case GAME_STATE_OVER:
             game_draw_game_over(&game);
@@ -565,6 +668,7 @@ void game_unload(Game game)
 {
     if (game.obstacles.items) free(game.obstacles.items);
     if (game.explosions.items) free(game.explosions.items);
+    if (game.particles.items) free(game.particles.items);
 
     UnloadSound(game.ship.jump_sound);
     UnloadSound(game.wha_wha_sound);
