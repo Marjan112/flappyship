@@ -243,8 +243,14 @@ bool explosions_update(Explosions *explosions, float delta_time)
 
 void explosions_draw(Explosions explosions)
 {
-    for (size_t i = 0; i < explosions.count; ++i) explosion_draw(explosions.items[i]);
+    for (size_t i = 0; i < explosions.count; ++i)
+        explosion_draw(explosions.items[i]);
 }
+
+typedef enum {
+    PARTICLE_KIND_OBSTACLE,
+    PARTICLE_KIND_SHIP
+} ParticleKind;
 
 typedef struct {
     Texture whole_texture; // The whole texture of something to be broken into particles
@@ -252,6 +258,7 @@ typedef struct {
     Vector2 position;
     Vector2 velocity;
     float life;
+    ParticleKind kind;
 } Particle;
 
 typedef struct {
@@ -260,7 +267,7 @@ typedef struct {
     size_t capacity;
 } Particles;
 
-void particles_add(Particles *particles, Texture whole_texture, Vector2 position, Vector2 emmiter_velocity)
+void particles_add(Particles *particles, Texture whole_texture, Vector2 position, Vector2 emmiter_velocity, ParticleKind kind)
 {
     for (int i = 0; i < 10; ++i) {
         int frame_width = whole_texture.width/4;
@@ -283,7 +290,8 @@ void particles_add(Particles *particles, Texture whole_texture, Vector2 position
             },
             .position = position,
             .velocity = Vector2Subtract(base_velocity, emmiter_velocity),
-            .life = 1
+            .life = 1,
+            .kind = kind
         };
 
         da_append(particles, particle);
@@ -314,7 +322,12 @@ void particles_draw(Particles particles)
     for (size_t i = 0; i < particles.count; ++i) {
         Particle particle = particles.items[i];
 
-        Vector2 origin = {particle.source.width/2, particle.source.height/2};
+        Vector2 origin = {0};
+        if (particle.kind == PARTICLE_KIND_SHIP) {
+            origin.x = particle.source.width/2;
+            origin.y = particle.source.height/2;
+        }
+
         Rectangle dest = {
             .x = particle.position.x,
             .y = particle.position.y,
@@ -413,7 +426,8 @@ Game game_init()
     };
 }
 
-void game_reset(Game *game) {
+void game_reset(Game *game)
+{
     game->ship.velocity = 0;
     game->ship.position.y = SCREEN_HEIGHT / 2.0f - SHIP_HEIGHT / 2.0f;
     game->ship.hitbox.y = game->ship.position.y;
@@ -541,7 +555,7 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
             game->explosions.shared_texture, LoadSoundAlias(game->explosions.shared_sound));
         da_append(&game->explosions, explosion);
 
-        particles_add(&game->particles, game->ship.texture, game->ship.position, Vector2Zero());
+        particles_add(&game->particles, game->ship.texture, game->ship.position, Vector2Zero(), PARTICLE_KIND_SHIP);
         return;
     }
 
@@ -549,14 +563,15 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
         obstacle->destroyed = true;
         ++game->destroyed_obstacles;
 
-        particles_add(&game->particles, game->obstacles.shared_texture, obstacle->position, CLITERAL(Vector2){game->obstacles.velocity, 0});
-
         Explosion explosion = new_explosion(
             obstacle->position.x, obstacle->position.y,
             game->obstacles.velocity,
             game->explosions.shared_texture, LoadSoundAlias(game->explosions.shared_sound));
 
         da_append(&game->explosions, explosion);
+
+        Vector2 velocity = {game->obstacles.velocity, 0};
+        particles_add(&game->particles, game->obstacles.shared_texture, obstacle->position, velocity, PARTICLE_KIND_OBSTACLE);
     }
 }
 
