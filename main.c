@@ -393,6 +393,7 @@ typedef struct {
     Particles particles;
     int destroyed_obstacles;
     int obstacles_missed;
+    int max_score;
     int last_speedup;
     GameState state;
     bool draw_hitbox;
@@ -420,6 +421,7 @@ Game game_init()
         .particles = particles,
         .destroyed_obstacles = 0,
         .obstacles_missed = 0,
+        .max_score = 0,
         .last_speedup = 0,
         .draw_hitbox = false,
         .state = GAME_STATE_NORMAL
@@ -451,9 +453,9 @@ void game_reset(Game *game)
     game->last_speedup = 0;
 }
 
-void game_draw_game_over(Game *game)
+void game_draw_game_over(Game game)
 {
-    int score = game->destroyed_obstacles - game->obstacles_missed;
+    int score = game.destroyed_obstacles - game.obstacles_missed;
 
     if (score < 0) {
         draw_text_centered(30, WHITE,
@@ -461,16 +463,18 @@ void game_draw_game_over(Game *game)
                           "You missed too much\n"
                           "Destroyed obstacles: %d\n"
                           "Missed obstacles: %d\n"
+                          "Max score: %d\n"
                           "Press ENTER to restart.",
-                          game->destroyed_obstacles, game->obstacles_missed);
+                          game.destroyed_obstacles, game.obstacles_missed, game.max_score);
     } else {
         draw_text_centered(30, WHITE,
                           "Game over\n"
                           "Destroyed obstacles: %d\n"
                           "Missed obstacles: %d\n"
                           "Score: %d\n"
+                          "Max score: %d\n"
                           "Press ENTER to restart.",
-                          game->destroyed_obstacles, game->obstacles_missed, score);
+                          game.destroyed_obstacles, game.obstacles_missed, score, game.max_score);
     }
 }
 
@@ -562,6 +566,9 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
     if (game->ship.position.x > obstacle->position.x && game->ship.position.y < obstacle->position.y - OBSTACLE_HEIGHT / 2.0f) {
         obstacle->destroyed = true;
         ++game->destroyed_obstacles;
+
+        int score = game->destroyed_obstacles - game->obstacles_missed;
+        if (score > game->max_score) game->max_score = score;
 
         Explosion explosion = new_explosion(
             obstacle->position.x, obstacle->position.y,
@@ -663,14 +670,14 @@ void game_draw(Game game)
             particles_draw(game.particles);
             game_draw_ship(game);
 
-            DrawText(TextFormat("Score: %d", game.destroyed_obstacles - game.obstacles_missed), 0.05f*SCREEN_WIDTH, 0.05f*SCREEN_HEIGHT, 30, WHITE);
+            DrawText(TextFormat("Score: %d/%d", game.destroyed_obstacles - game.obstacles_missed, game.max_score), 0.05f*SCREEN_WIDTH, 0.05f*SCREEN_HEIGHT, 30, WHITE);
             break;
         case GAME_STATE_SHIP_EXPLOSION:
             explosions_draw(game.explosions);
             particles_draw(game.particles);
             break;
         case GAME_STATE_OVER:
-            game_draw_game_over(&game);
+            game_draw_game_over(game);
             break;
         case GAME_STATE_PAUSE:
             draw_text_centered(30, WHITE, "Paused");
