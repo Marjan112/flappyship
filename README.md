@@ -20,3 +20,4 @@ cmake --build build
 
 - Explosion: https://opengameart.org/content/explosion-0
 - Wha wha wha wha: https://www.myinstants.com/media/sounds/wha-wha.mp3
+- Alien blaster: https://opengameart.org/content/alien-blaster
