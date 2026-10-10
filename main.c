@@ -151,7 +151,6 @@ Ship new_ship()
 
 typedef struct {
     Rectangle rect;
-    Vector2 velocity;
     float angle;
     bool hit;
 } Bullet;
@@ -165,7 +164,6 @@ Bullet new_bullet(Vector2 position, float angle)
             .width = BULLET_WIDTH,
             .height = BULLET_HEIGHT
         },
-        .velocity = {BACKGROUND_SCROLL_SPEED, BACKGROUND_SCROLL_SPEED},
         .angle = angle,
         .hit = false
     };
