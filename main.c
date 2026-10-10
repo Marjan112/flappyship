@@ -15,6 +15,7 @@
 #include <textures_Layered_Rock_0.png.h>
 #include <textures_Space_Background.png.h>
 #include <textures_explosion_pixelfied.png.h>
+#include <sounds_alien-blaster.wav.h>
 
 #define SCREEN_WIDTH                600
 #define SCREEN_HEIGHT               800
@@ -40,6 +41,9 @@
 #define OBSTACLE_HITBOX_HEIGHT      (OBSTACLE_HEIGHT*HITBOX_FACTOR)
 #define OBSTACLE_ROTATION_SPEED     10
 #define OBSTACLE_VELOCITY           100
+
+#define BULLET_WIDTH                30
+#define BULLET_HEIGHT               5
 
 #define EXPLOSION_COLUMN            4
 #define EXPLOSION_ROW               4
@@ -143,6 +147,46 @@ Ship new_ship()
         .velocity = 0,
         .rotation = 0,
     };
+}
+
+typedef struct {
+    Rectangle rect;
+    Vector2 velocity;
+    float angle;
+    bool hit;
+} Bullet;
+
+Bullet new_bullet(Vector2 position, float angle)
+{
+    return CLITERAL(Bullet) {
+        .rect = {
+            .x = position.x,
+            .y = position.y,
+            .width = BULLET_WIDTH,
+            .height = BULLET_HEIGHT
+        },
+        .velocity = {BACKGROUND_SCROLL_SPEED, BACKGROUND_SCROLL_SPEED},
+        .angle = angle,
+        .hit = false
+    };
+}
+
+void bullet_draw(Bullet bullet)
+{
+    Vector2 origin = {bullet.rect.width/2, bullet.rect.height/2};
+    DrawRectanglePro(bullet.rect, origin, bullet.angle, PURPLE);
+}
+
+typedef struct {
+    Bullet *items;
+    size_t count;
+    size_t capacity;
+} Bullets;
+
+void bullets_draw(Bullets bullets)
+{
+    for (size_t i = 0; i < bullets.count; ++i)
+        bullet_draw(bullets.items[i]);
 }
 
 typedef struct {
@@ -373,6 +417,8 @@ typedef struct {
     size_t count;
     size_t capacity;
     float spawn_timer;
+    float spawn_interval_min;
+    float spawn_interval_max;
     float spawn_interval;
     float velocity;
 } Obstacles;
@@ -388,7 +434,9 @@ typedef struct {
     Ship ship;
     Explosions explosions;
     Obstacles obstacles;
+    Bullets bullets;
     Sound wha_wha_sound;
+    Sound fire_sound;
     Background background;
     Particles particles;
     int destroyed_obstacles;
@@ -403,8 +451,12 @@ Game game_init()
 {
     Obstacles obstacles = {0};
     obstacles.shared_texture = load_texture_from_memory(".png", textures_Layered_Rock_0_png, textures_Layered_Rock_0_png_size);
-    obstacles.spawn_interval = 3;
+    obstacles.spawn_interval_min = 15;
+    obstacles.spawn_interval_max = 30;
+    obstacles.spawn_interval = GetRandomValue(obstacles.spawn_interval_min, obstacles.spawn_interval_max) / 10.0f;
     obstacles.velocity = OBSTACLE_VELOCITY;
+
+    Bullets bullets = {0};
 
     Explosions explosions = {0};
     explosions.shared_sound = load_sound_from_memory(".wav", sounds_explosion_wav, sounds_explosion_wav_size);
@@ -414,8 +466,10 @@ Game game_init()
 
     return CLITERAL(Game) {
         .obstacles = obstacles,
+        .bullets = bullets,
         .ship = new_ship(),
         .wha_wha_sound = load_sound_from_memory(".mp3", sounds_wha_wha_mp3, sounds_wha_wha_mp3_size),
+        .fire_sound = load_sound_from_memory(".wav", sounds_alien_blaster_wav, sounds_alien_blaster_wav_size),
         .explosions = explosions,
         .background = new_background(),
         .particles = particles,
@@ -441,8 +495,12 @@ void game_reset(Game *game)
 
     game->obstacles.count = 0;
     game->obstacles.spawn_timer = 0;
-    game->obstacles.spawn_interval = 3;
+    game->obstacles.spawn_interval_min = 15;
+    game->obstacles.spawn_interval_max = 30;
+    game->obstacles.spawn_interval = GetRandomValue(game->obstacles.spawn_interval_min, game->obstacles.spawn_interval_max) / 10.0f;
     game->obstacles.velocity = OBSTACLE_VELOCITY;
+
+    game->bullets.count = 0;
 
     game->explosions.count = 0;
 
@@ -500,12 +558,24 @@ void game_update_ship(Game *game, float delta_time)
         PlaySound(game->ship.jump_sound);
     }
 
+    if (/*game->destroyed_obstacles >= 50 && */ IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        Vector2 bullet_position = {
+            .x = game->ship.position.x + SHIP_WIDTH/2.0f,
+            .y = game->ship.position.y
+        };
+        Bullet bullet = new_bullet(bullet_position, game->ship.rotation);
+        da_append(&game->bullets, bullet);
+        PlaySound(game->fire_sound);
+    }
+
     if (game->state == GAME_STATE_NORMAL && IsSoundPlaying(game->wha_wha_sound))
         StopSound(game->wha_wha_sound);
 
     if (game->ship.hitbox.y + SHIP_HITBOX_HEIGHT / 2.0f >= SCREEN_HEIGHT) {
-        PlaySound(game->wha_wha_sound);
-        game->state = GAME_STATE_OVER;
+        // PlaySound(game->wha_wha_sound);
+        // game->state = GAME_STATE_OVER;
+        game->ship.position.y = 0;
+        game->ship.velocity = 0;
     } else if (game->ship.position.y - SHIP_HITBOX_HEIGHT / 2.0f <= 0) game->ship.velocity = 100;
 
     float target_rotation = 0;
@@ -567,9 +637,6 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
         obstacle->destroyed = true;
         ++game->destroyed_obstacles;
 
-        int score = game->destroyed_obstacles - game->obstacles_missed;
-        if (score > game->max_score) game->max_score = score;
-
         Explosion explosion = new_explosion(
             obstacle->position.x, obstacle->position.y,
             game->obstacles.velocity,
@@ -614,6 +681,48 @@ void game_draw_obstacles(Game game)
     for (size_t i = 0; i < game.obstacles.count; ++i) game_draw_obstacle(game, i);
 }
 
+void game_update_bullet(Game *game, Bullet *bullet, float delta_time)
+{
+    bullet->rect.x += game->background.scroll_speed*delta_time*cos(bullet->angle*DEG2RAD);
+    bullet->rect.y += game->background.scroll_speed*delta_time*sin(bullet->angle*DEG2RAD);
+
+    for (size_t i = 0; i < game->obstacles.count; ++i) {
+        Obstacle *obstacle = &game->obstacles.items[i];
+
+        if (CheckCollisionRecs(bullet->rect, obstacle->hitbox) && !obstacle->destroyed) {
+            bullet->hit = true;
+            obstacle->destroyed = true;
+            ++game->destroyed_obstacles;
+
+            Explosion explosion = new_explosion(
+                obstacle->position.x, obstacle->position.y,
+                game->obstacles.velocity,
+                game->explosions.shared_texture, LoadSoundAlias(game->explosions.shared_sound));
+
+            da_append(&game->explosions, explosion);
+
+            Vector2 velocity = {game->obstacles.velocity, 0};
+            particles_add(&game->particles, game->obstacles.shared_texture, obstacle->position, velocity, PARTICLE_KIND_OBSTACLE);
+        }
+    }
+}
+
+void game_update_bullets(Game *game, float delta_time)
+{
+    for (size_t i = 0; i < game->bullets.count;) {
+        Bullet *bullet = &game->bullets.items[i];
+
+        game_update_bullet(game, bullet, delta_time);
+
+        if (bullet->rect.x < 0 || bullet->rect.x > SCREEN_WIDTH || bullet->rect.y < 0 || bullet->rect.y > SCREEN_HEIGHT || bullet->hit) {
+            da_remove_unordered(&game->bullets, i);
+            continue;
+        }
+
+        ++i;
+    }
+}
+
 void game_update(Game *game, float delta_time)
 {
     game->obstacles.spawn_timer += delta_time;
@@ -629,6 +738,8 @@ void game_update(Game *game, float delta_time)
                 game->last_speedup = game->destroyed_obstacles;
                 game->obstacles.velocity += VELOCITY_ACCELERATE;
                 game->background.scroll_speed += VELOCITY_ACCELERATE;
+                if (game->obstacles.spawn_interval_max > 15) game->obstacles.spawn_interval_max -= 1;
+                if (game->obstacles.spawn_interval_min > 10) game->obstacles.spawn_interval_min -= 1;
             }
 
             if (game->obstacles.spawn_timer >= game->obstacles.spawn_interval) {
@@ -637,13 +748,18 @@ void game_update(Game *game, float delta_time)
                 Obstacle new = new_obstacle(SCREEN_WIDTH + OBSTACLE_WIDTH, y, game->obstacles.shared_texture);
                 da_append(&game->obstacles, new);
                 game->obstacles.spawn_timer = 0;
-                game->obstacles.spawn_interval = GetRandomValue(15, 30) / 10.0f;
+                game->obstacles.spawn_interval = GetRandomValue(game->obstacles.spawn_interval_min, game->obstacles.spawn_interval_max) / 10.0f;
             }
 
             game_update_obstacles(game, delta_time);
+            game_update_bullets(game, delta_time);
             explosions_update(&game->explosions, delta_time);
             particles_update(&game->particles, delta_time);
             game_update_ship(game, delta_time);
+
+            int score = game->destroyed_obstacles - game->obstacles_missed;
+            if (score > game->max_score) game->max_score = score;
+
             break;
         case GAME_STATE_SHIP_EXPLOSION:
             if (!explosions_update(&game->explosions, delta_time) && !particles_update(&game->particles, delta_time))
@@ -666,6 +782,7 @@ void game_draw(Game game)
     switch (game.state) {
         case GAME_STATE_NORMAL:
             game_draw_obstacles(game);
+            bullets_draw(game.bullets);
             explosions_draw(game.explosions);
             particles_draw(game.particles);
             game_draw_ship(game);
@@ -689,11 +806,13 @@ void game_draw(Game game)
 void game_unload(Game game)
 {
     if (game.obstacles.items) free(game.obstacles.items);
+    if (game.bullets.items) free(game.bullets.items);
     if (game.explosions.items) free(game.explosions.items);
     if (game.particles.items) free(game.particles.items);
 
     UnloadSound(game.ship.jump_sound);
     UnloadSound(game.wha_wha_sound);
+    UnloadSound(game.fire_sound);
     UnloadSound(game.explosions.shared_sound);
 
     UnloadTexture(game.ship.texture);
