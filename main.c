@@ -37,8 +37,8 @@
 
 #define OBSTACLE_WIDTH              70
 #define OBSTACLE_HEIGHT             70
-#define OBSTACLE_HITBOX_WIDTH       (OBSTACLE_WIDTH*HITBOX_FACTOR)
-#define OBSTACLE_HITBOX_HEIGHT      (OBSTACLE_HEIGHT*HITBOX_FACTOR)
+#define OBSTACLE_HITBOX_FACTOR      0.5f
+#define OBSTACLE_HITBOX_RADIUS      (OBSTACLE_HEIGHT*OBSTACLE_HITBOX_FACTOR)
 #define OBSTACLE_ROTATION_SPEED     10
 #define OBSTACLE_VELOCITY           100
 
@@ -383,8 +383,13 @@ void particles_draw(Particles particles)
 }
 
 typedef struct {
+    Vector2 center; 
+    float radius;
+} CircleHitbox;
+
+typedef struct {
     Texture texture;
-    Rectangle hitbox;
+    CircleHitbox hitbox;
     Vector2 position;
     float rotation;
     bool destroyed;
@@ -394,16 +399,11 @@ Obstacle new_obstacle(int x, int y, Texture texture)
 {
     return CLITERAL(Obstacle) {
         .texture = texture,
-        .hitbox = CLITERAL(Rectangle) {
-            .x = x - OBSTACLE_WIDTH / 2.0f,
-            .y = y - OBSTACLE_HEIGHT / 2.0f,
-            .width = OBSTACLE_HITBOX_WIDTH,
-            .height = OBSTACLE_HITBOX_HEIGHT
+        .hitbox = {
+            .center = {x, y},
+            .radius = OBSTACLE_HITBOX_RADIUS
         },
-        .position = CLITERAL(Vector2) {
-            .x = x,
-            .y = y
-        },
+        .position = {x, y},
         .rotation = 0,
         .destroyed = false
     };
@@ -556,7 +556,7 @@ void game_update_ship(Game *game, float delta_time)
         PlaySound(game->ship.jump_sound);
     }
 
-    if (/*game->destroyed_obstacles >= 50 && */ IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (game->destroyed_obstacles >= 100 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         Vector2 bullet_position = {
             .x = game->ship.position.x + SHIP_WIDTH/2.0f,
             .y = game->ship.position.y
@@ -599,8 +599,8 @@ void game_draw_ship(Game game)
 void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
 {
     obstacle->position.x -= game->obstacles.velocity*delta_time;
-    obstacle->hitbox.x = obstacle->position.x - OBSTACLE_WIDTH / 2.0f;
-    obstacle->hitbox.y = obstacle->position.y - OBSTACLE_HEIGHT / 2.0f;
+    obstacle->hitbox.center.x = obstacle->position.x;
+    obstacle->hitbox.center.y = obstacle->position.y;
 
     if (obstacle->position.x <= 0) {
         obstacle->destroyed = true;
@@ -615,7 +615,7 @@ void game_update_obstacle(Game *game, Obstacle *obstacle, float delta_time)
     obstacle->rotation += OBSTACLE_ROTATION_SPEED*delta_time;
     if (obstacle->rotation >= 360) obstacle->rotation = 0;
 
-    if (CheckCollisionRecs(obstacle->hitbox, game->ship.hitbox)) {
+    if (CheckCollisionCircleRec(obstacle->hitbox.center, obstacle->hitbox.radius, game->ship.hitbox)) {
         PlaySound(game->wha_wha_sound);
 
         game->state = GAME_STATE_SHIP_EXPLOSION;
@@ -655,7 +655,7 @@ void game_draw_obstacle(Game game, size_t obstacle_index)
     Vector2 origin = {OBSTACLE_WIDTH / 2.0f, OBSTACLE_HEIGHT / 2.0f};
 
     DrawTexturePro(obstacle.texture, source, dest, origin, obstacle.rotation, WHITE);
-    if (game.draw_hitbox) DrawRectangleLines(obstacle.hitbox.x, obstacle.hitbox.y, obstacle.hitbox.width, obstacle.hitbox.height, RED);
+    if (game.draw_hitbox) DrawCircleLinesV(obstacle.hitbox.center, obstacle.hitbox.radius, RED);
 }
 
 void game_update_obstacles(Game *game, float delta_time)
@@ -681,13 +681,13 @@ void game_draw_obstacles(Game game)
 
 void game_update_bullet(Game *game, Bullet *bullet, float delta_time)
 {
-    bullet->rect.x += game->background.scroll_speed*delta_time*cos(bullet->angle*DEG2RAD);
-    bullet->rect.y += game->background.scroll_speed*delta_time*sin(bullet->angle*DEG2RAD);
+    bullet->rect.x += game->background.scroll_speed*delta_time*cosf(bullet->angle*DEG2RAD);
+    bullet->rect.y += game->background.scroll_speed*delta_time*sinf(bullet->angle*DEG2RAD);
 
     for (size_t i = 0; i < game->obstacles.count; ++i) {
         Obstacle *obstacle = &game->obstacles.items[i];
 
-        if (CheckCollisionRecs(bullet->rect, obstacle->hitbox) && !obstacle->destroyed) {
+        if (CheckCollisionCircleRec(obstacle->hitbox.center, obstacle->hitbox.radius, bullet->rect) && !obstacle->destroyed) {
             bullet->hit = true;
             obstacle->destroyed = true;
             ++game->destroyed_obstacles;
